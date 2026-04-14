@@ -98,10 +98,17 @@ export default function ClassroomPlanner() {
 
   const handleAddStudent = (event) => {
     event.preventDefault();
-    const trimmedName = newStudentName.trim();
-    if (!trimmedName) return;
+    const namesToAdd = newStudentName
+      .split(/[;,]/)
+      .map((name) => name.trim())
+      .filter(Boolean);
 
-    setStudents((prev) => [...prev, { id: createStudentId(prev.length), name: trimmedName }]);
+    if (namesToAdd.length === 0) return;
+
+    setStudents((prev) => [
+      ...prev,
+      ...namesToAdd.map((name, index) => ({ id: createStudentId(prev.length + index), name }))
+    ]);
     setNewStudentName('');
     setNotice('');
   };
@@ -121,6 +128,12 @@ export default function ClassroomPlanner() {
   const removeStudent = (studentId) => {
     setStudents((prev) => prev.filter((student) => student.id !== studentId));
     unassignStudent(studentId);
+  };
+
+  const clearStudentList = () => {
+    setStudents([]);
+    setAssignments({});
+    setNotice('');
   };
 
   const addDesk = (type) => {
@@ -481,8 +494,8 @@ export default function ClassroomPlanner() {
         onChange={handlePlanImport}
       />
 
-      <div className="z-10 flex w-80 shrink-0 flex-col border-r border-slate-200 bg-white shadow-xl">
-        <div className="border-b border-slate-100 bg-slate-50 p-4">
+      <div className="z-10 flex h-full w-80 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white shadow-xl">
+        <div className="sticky top-0 z-20 border-b border-slate-100 bg-slate-50 p-4">
           <h1 className="flex items-center gap-2 text-xl font-bold text-slate-700">
             <LayoutGrid className="text-blue-500" />
             Classroom Planner
@@ -522,6 +535,12 @@ export default function ClassroomPlanner() {
             >
               <UserX size={16} /> Clear Assignments
             </button>
+            <button
+              onClick={clearStudentList}
+              className="flex w-full items-center justify-center gap-2 rounded bg-red-50 py-2 text-sm font-medium text-red-700 shadow-sm transition-colors hover:bg-red-100"
+            >
+              <Trash2 size={16} /> Clear Student List
+            </button>
           </div>
         </div>
 
@@ -549,7 +568,7 @@ export default function ClassroomPlanner() {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex flex-col">
           <div className="p-4 pb-2">
             <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-500">
               <Users size={16} /> Students ({students.length})
@@ -559,17 +578,17 @@ export default function ClassroomPlanner() {
                 type="text"
                 value={newStudentName}
                 onChange={(event) => setNewStudentName(event.target.value)}
-                placeholder="New student name..."
+                placeholder="New student name, or multiple with , or ;"
                 className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button type="submit" className="rounded bg-slate-800 p-2 text-white transition-colors hover:bg-slate-700">
                 <Plus size={18} />
               </button>
             </form>
-            <p className="mb-2 text-xs text-slate-400">Drag students from the list or between seats.</p>
+            <p className="mb-2 text-xs text-slate-400">Drag students from the list or between seats. You can also paste multiple names separated by commas or semicolons.</p>
           </div>
 
-          <ul className="flex-1 space-y-2 overflow-y-auto px-4 pb-4">
+          <ul className="space-y-2 px-4 pb-4">
             {students.map((student) => {
               const isAssigned = Object.values(assignments).includes(student.id);
 
