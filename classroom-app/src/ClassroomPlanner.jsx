@@ -66,6 +66,13 @@ const parseCsv = (text) =>
     .map(parseCsvLine);
 
 export default function ClassroomPlanner() {
+  const singleDeskWidth = 110;
+  const doubleDeskWidth = 220;
+  const deskHeight = 110;
+  const rowGap = 110;
+  const snapThreshold = 18;
+  const alignmentThreshold = 20;
+
   const [students, setStudents] = useState([
     { id: 's1', name: 'Alice Smith' },
     { id: 's2', name: 'Bob Jones' },
@@ -80,6 +87,8 @@ export default function ClassroomPlanner() {
   ]);
   const [assignments, setAssignments] = useState({});
   const [newStudentName, setNewStudentName] = useState('');
+  const [seatsPerRow, setSeatsPerRow] = useState('6');
+  const [rowCount, setRowCount] = useState('3');
   const [warning, setWarning] = useState('');
   const [activeDragDesk, setActiveDragDesk] = useState(null);
   const [selectedDeskId, setSelectedDeskId] = useState(null);
@@ -95,6 +104,112 @@ export default function ClassroomPlanner() {
 
   const findSeatForStudent = (studentId, currentAssignments) =>
     Object.keys(currentAssignments).find((seatId) => currentAssignments[seatId] === studentId);
+
+  const getDeskCellOffsets = (desk) => {
+    if (desk.type === 1) {
+      return [{ x: 0, y: 0 }];
+    }
+
+    const normalizedRotation = ((desk.rotation % 360) + 360) % 360;
+
+    if (normalizedRotation === 90) {
+      return [
+        { x: 0, y: -singleDeskWidth / 2 },
+        { x: 0, y: singleDeskWidth / 2 }
+      ];
+    }
+
+    if (normalizedRotation === 180) {
+      return [
+        { x: singleDeskWidth / 2, y: 0 },
+        { x: -singleDeskWidth / 2, y: 0 }
+      ];
+    }
+
+    if (normalizedRotation === 270) {
+      return [
+        { x: 0, y: singleDeskWidth / 2 },
+        { x: 0, y: -singleDeskWidth / 2 }
+      ];
+    }
+
+    return [
+      { x: -singleDeskWidth / 2, y: 0 },
+      { x: singleDeskWidth / 2, y: 0 }
+    ];
+  };
+
+  const getDeskCells = (desk, centerX = desk.x, centerY = desk.y) =>
+    getDeskCellOffsets(desk).map((offset, index) => ({
+      id: `${desk.id}_cell_${index}`,
+      x: centerX + offset.x,
+      y: centerY + offset.y
+    }));
+
+  const snapDeskPosition = (movingDesk, proposedX, proposedY, otherDesks) => {
+    const movingCells = getDeskCells(movingDesk, proposedX, proposedY);
+    const otherCells = otherDesks.flatMap((desk) => getDeskCells(desk));
+    const directions = [
+      { x: singleDeskWidth, y: 0 },
+      { x: -singleDeskWidth, y: 0 },
+      { x: 0, y: singleDeskWidth },
+      { x: 0, y: -singleDeskWidth }
+    ];
+
+    let bestCandidate = null;
+
+    movingCells.forEach((movingCell) => {
+      otherCells.forEach((otherCell) => {
+        directions.forEach((direction) => {
+          const targetCellX = otherCell.x + direction.x;
+          const targetCellY = otherCell.y + direction.y;
+          const deltaX = targetCellX - movingCell.x;
+          const deltaY = targetCellY - movingCell.y;
+
+          if (Math.abs(deltaX) > snapThreshold || Math.abs(deltaY) > snapThreshold) {
+            return;
+          }
+
+          const candidateX = proposedX + deltaX;
+          const candidateY = proposedY + deltaY;
+          const candidateCells = getDeskCells(movingDesk, candidateX, candidateY);
+          const overlapsExistingDesk = candidateCells.some((candidateCell) =>
+            otherCells.some(
+              (other) =>
+                Math.abs(candidateCell.x - other.x) < 1 &&
+                Math.abs(candidateCell.y - other.y) < 1
+            )
+          );
+
+          if (overlapsExistingDesk) {
+            return;
+          }
+
+          const candidateDistance = Math.hypot(deltaX, deltaY);
+
+          if (!bestCandidate || candidateDistance < bestCandidate.distance) {
+            bestCandidate = {
+              x: candidateX,
+              y: candidateY,
+              distance: candidateDistance
+            };
+          }
+        });
+      });
+    });
+
+    if (bestCandidate) {
+      return { x: bestCandidate.x, y: bestCandidate.y };
+    }
+
+    const alignedX = otherCells.find((cell) => Math.abs(cell.x - proposedX) <= alignmentThreshold)?.x;
+    const alignedY = otherCells.find((cell) => Math.abs(cell.y - proposedY) <= alignmentThreshold)?.y;
+
+    return {
+      x: alignedX ?? proposedX,
+      y: alignedY ?? proposedY
+    };
+  };
 
   const handleAddStudent = (event) => {
     event.preventDefault();
@@ -136,20 +251,90 @@ export default function ClassroomPlanner() {
     setNotice('');
   };
 
-  const addDesk = (type) => {
-    const newId = createDeskId(desks.length);
-    const newDesk = {
+  const clearAllDesks = () => {
+    setDesks([]);
+    setAssignments({});
+    setSelectedDeskId(null);
+    setActiveDragDesk(null);
+    setNotice('');
+  };
+
+  const createDesk = (type, x, y, index) => {
+    const newId = createDeskId(index);
+    return {
       id: newId,
       type,
-      x: window.innerWidth / 2 || 400,
-      y: window.innerHeight / 2 || 300,
+      x,
+      y,
       rotation: 0,
       seats: type === 1 ? [`${newId}_s1`] : [`${newId}_s1`, `${newId}_s2`]
     };
+  };
+
+  const addDesk = (type) => {
+    const newDesk = createDesk(
+      type,
+      window.innerWidth / 2 || 400,
+      window.innerHeight / 2 || 300,
+      desks.length
+    );
 
     setDesks((prev) => [...prev, newDesk]);
-    setSelectedDeskId(newId);
+    setSelectedDeskId(newDesk.id);
     setNotice('');
+  };
+
+  const generateDeskRows = () => {
+    const seatsValue = Number.parseInt(seatsPerRow, 10);
+    const rowsValue = Number.parseInt(rowCount, 10);
+
+    if (!Number.isFinite(seatsValue) || !Number.isFinite(rowsValue) || seatsValue <= 0 || rowsValue <= 0) {
+      setNotice('Please enter a whole number greater than 0 for seats per row and rows.');
+      return;
+    }
+
+    const rowDeskConfigs = [];
+    let remainingSeats = seatsValue;
+
+    while (remainingSeats >= 2) {
+      rowDeskConfigs.push({ type: 2, width: doubleDeskWidth });
+      remainingSeats -= 2;
+    }
+
+    if (remainingSeats === 1) {
+      rowDeskConfigs.push({ type: 1, width: singleDeskWidth });
+    }
+
+    const totalRowWidth = rowDeskConfigs.reduce((sum, desk) => sum + desk.width, 0);
+    const canvasCenterX = window.innerWidth * 0.6 || 700;
+    const canvasCenterY = window.innerHeight * 0.4 || 320;
+    const startX = canvasCenterX - totalRowWidth / 2;
+    const startY = canvasCenterY - (((rowsValue - 1) * (deskHeight + rowGap)) / 2);
+    const createdDesks = [];
+
+    for (let rowIndex = 0; rowIndex < rowsValue; rowIndex += 1) {
+      let cursorX = startX;
+
+      rowDeskConfigs.forEach((deskConfig) => {
+        const centerX = cursorX + deskConfig.width / 2;
+        const centerY = startY + rowIndex * (deskHeight + rowGap);
+
+        createdDesks.push(
+          createDesk(deskConfig.type, centerX, centerY, desks.length + createdDesks.length)
+        );
+
+        cursorX += deskConfig.width;
+      });
+    }
+
+    if (createdDesks.length === 0) {
+      setNotice('No desks were generated from the current row settings.');
+      return;
+    }
+
+    setDesks((prev) => [...prev, ...createdDesks]);
+    setSelectedDeskId(createdDesks[createdDesks.length - 1]?.id ?? null);
+    setNotice(`Added ${createdDesks.length} desks across ${rowsValue} row${rowsValue === 1 ? '' : 's'}.`);
   };
 
   const removeDesk = (deskId) => {
@@ -200,11 +385,23 @@ export default function ClassroomPlanner() {
 
       const dx = event.clientX - activeDragDesk.pointerStartX;
       const dy = event.clientY - activeDragDesk.pointerStartY;
+      const movingDesk = desks.find((desk) => desk.id === activeDragDesk.id);
+
+      if (!movingDesk) return;
+
+      const proposedX = activeDragDesk.startX + dx;
+      const proposedY = activeDragDesk.startY + dy;
+      const snappedPosition = snapDeskPosition(
+        movingDesk,
+        proposedX,
+        proposedY,
+        desks.filter((desk) => desk.id !== activeDragDesk.id)
+      );
 
       setDesks((prev) =>
         prev.map((desk) =>
           desk.id === activeDragDesk.id
-            ? { ...desk, x: activeDragDesk.startX + dx, y: activeDragDesk.startY + dy }
+            ? { ...desk, x: snappedPosition.x, y: snappedPosition.y }
             : desk
         )
       );
@@ -223,7 +420,7 @@ export default function ClassroomPlanner() {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [activeDragDesk]);
+  }, [activeDragDesk, desks]);
 
   const moveStudentToSeat = ({ studentId, targetSeatId, fromSeatId = null }) => {
     setAssignments((prev) => {
@@ -518,6 +715,42 @@ export default function ClassroomPlanner() {
               <Plus size={16} /> 2 Seats
             </button>
           </div>
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Generate Rows</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+                Seats per row
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={seatsPerRow}
+                  onChange={(event) => setSeatsPerRow(event.target.value)}
+                  className="rounded border border-slate-300 px-2 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+                Rows
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={rowCount}
+                  onChange={(event) => setRowCount(event.target.value)}
+                  className="rounded border border-slate-300 px-2 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+            </div>
+            <button
+              onClick={generateDeskRows}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded bg-amber-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-amber-700"
+            >
+              <Plus size={16} /> Generate Desk Rows
+            </button>
+            <p className="mt-2 text-xs text-slate-400">
+              Uses 2-seat desks by default. If seats per row is odd, each row ends with one 1-seat desk.
+            </p>
+          </div>
         </div>
 
         <div className="border-b border-slate-100 p-4">
@@ -540,6 +773,12 @@ export default function ClassroomPlanner() {
               className="flex w-full items-center justify-center gap-2 rounded bg-red-50 py-2 text-sm font-medium text-red-700 shadow-sm transition-colors hover:bg-red-100"
             >
               <Trash2 size={16} /> Clear Student List
+            </button>
+            <button
+              onClick={clearAllDesks}
+              className="flex w-full items-center justify-center gap-2 rounded bg-red-50 py-2 text-sm font-medium text-red-700 shadow-sm transition-colors hover:bg-red-100"
+            >
+              <Trash2 size={16} /> Clear All Desks
             </button>
           </div>
         </div>
